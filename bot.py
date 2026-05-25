@@ -405,6 +405,13 @@ def cron():
 def index():
     return "Bot is running", 200
 
+
+if not os.path.exists(DATA_FILE):
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump({"users": {}, "settings": {"price_per_month": 100}}, f, indent=2)
+    print("data.json created")
+    
+
 # ========== Запуск (для Render используется Gunicorn) ==========
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
