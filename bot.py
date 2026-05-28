@@ -327,6 +327,10 @@ async def index():
 def run_bot():
     bot_app = Application.builder().token(BOT_TOKEN).build()
     
+    import asyncio
+    asyncio.run(bot_app.bot.delete_webhook())
+    print("Old webhook deleted")
+    
     # Регистрируем хэндлеры
     bot_app.add_handler(CommandHandler("start", start))
     bot_app.add_handler(CommandHandler("admin", admin_command))
