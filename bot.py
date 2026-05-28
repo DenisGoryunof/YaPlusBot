@@ -328,7 +328,7 @@ def run_bot():
     bot_app = Application.builder().token(BOT_TOKEN).build()
     
     import asyncio
-    asyncio.run(bot_app.bot.delete_webhook())
+    asyncio.run(bot_app.bot.delete_webhook(drop_pending_updates=True))
     print("Old webhook deleted")
     
     # Регистрируем хэндлеры
