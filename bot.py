@@ -267,14 +267,6 @@ bot_app.add_handler(CallbackQueryHandler(manual_select_callback, pattern="^manua
 bot_app.add_handler(CallbackQueryHandler(manual_extend_callback, pattern="^manual_months_"))
 bot_app.add_handler(CallbackQueryHandler(back_to_admin_panel_callback, pattern="^back_to_admin_panel$"))
 
-@app.on_event("startup")
-async def setup_webhook():
-    hostname = os.getenv("RENDER_EXTERNAL_HOSTNAME")
-    if hostname:
-        webhook_url = f"https://{hostname}/{BOT_TOKEN}"
-        await bot_app.bot.set_webhook(webhook_url)
-        print(f"Webhook set to {webhook_url}")
-
 @app.post(f"/{BOT_TOKEN}")
 async def webhook(request: Request):
     update = Update.de_json(await request.json(), bot_app.bot)
@@ -295,8 +287,19 @@ async def cron(request: Request):
 async def index():
     return {"message": "Bot is running"}
 
-# Точка входа для uvicorn
+# --- Запуск бота в режиме Long Polling ---
 if __name__ == "__main__":
+    import asyncio
     import uvicorn
-    port = int(os.environ.get("PORT", 10000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    from threading import Thread
+
+    # Запускаем Flask-сервер в отдельном потоке (чтобы он отвечал на /cron)
+    def run_flask():
+        uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+
+    flask_thread = Thread(target=run_flask)
+    flask_thread.start()
+
+    # Запускаем бота в режиме Long Polling (в главном потоке)
+    print("Starting bot in long polling mode...")
+    bot_app.run_polling()
