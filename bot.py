@@ -367,8 +367,13 @@ async def cron(request: Request):
 async def index():
     return {"message": "Bot is running"}
 
-# ========== ЗАПУСК БОТА В ФОНЕ ==========
-def run_bot():
+# ========== ФУНКЦИЯ ЗАПУСКА FASTAPI В ФОНЕ ==========
+def run_fastapi():
+    port = int(os.environ.get("PORT", 10000))
+    uvicorn.run(fastapi_app, host="0.0.0.0", port=port)
+
+# ========== ЗАПУСК БОТА ==========
+async def run_bot():
     print("🚀 Starting bot polling...")
     
     bot_app = Application.builder().token(BOT_TOKEN).build()
@@ -388,23 +393,17 @@ def run_bot():
     bot_app.add_handler(CallbackQueryHandler(back_to_admin_panel_callback, pattern="^back_to_admin_panel$"))
     
     # Удаляем старый вебхук, если был
-    async def clear_and_poll():
-        await bot_app.bot.delete_webhook(drop_pending_updates=True)
-        print("✅ Old webhook cleared")
-        await bot_app.run_polling()
+    await bot_app.bot.delete_webhook(drop_pending_updates=True)
+    print("✅ Old webhook cleared")
     
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(clear_and_poll())
-    loop.close()
+    # Запускаем polling
+    await bot_app.run_polling()
 
 # ========== ТОЧКА ВХОДА ==========
 if __name__ == "__main__":
-    # Запускаем бота в отдельном потоке
-    bot_thread = threading.Thread(target=run_bot, daemon=True)
-    bot_thread.start()
+    # Запускаем FastAPI в отдельном потоке (он не требует главного потока для сигналов)
+    fastapi_thread = threading.Thread(target=run_fastapi, daemon=True)
+    fastapi_thread.start()
     
-    # Запускаем FastAPI сервер
-    port = int(os.environ.get("PORT", 10000))
-    print(f"🌐 Starting FastAPI server on port {port}...")
-    uvicorn.run(fastapi_app, host="0.0.0.0", port=port)
+    # Запускаем бота в главном потоке (он требует работы с сигналами)
+    asyncio.run(run_bot())
