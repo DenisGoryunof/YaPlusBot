@@ -1,18 +1,15 @@
 import os
 import json
 from datetime import datetime, timedelta
-from flask import Flask, request
 from dotenv import load_dotenv
-import telegram
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, MessageHandler, Filters, CallbackContext
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
 GROUP_ID = int(os.getenv("GROUP_ID"))
-CRON_SECRET = os.getenv("CRON_SECRET")
 DATA_FILE = "data.json"
 MONTH_PRICE = 100
 
@@ -80,93 +77,98 @@ def admin_panel_keyboard():
     return InlineKeyboardMarkup(keyboard)
 
 # ========== ХЭНДЛЕРЫ ==========
-def start(update: Update, context: CallbackContext):
-    user = update.effective_user
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type == "private":
+        user = update.effective_user
         update_user(user.id, username=user.username, first_name=user.first_name)
-        update.message.reply_text("Добро пожаловать! Используйте меню ниже.", reply_markup=main_menu_keyboard())
+        await update.message.reply_text("Добро пожаловать! Используйте меню ниже.", reply_markup=main_menu_keyboard())
 
-def my_subscription(update: Update, context: CallbackContext):
+async def my_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    query.answer()
+    await query.answer()
     end_date = get_subscription_end(query.from_user.id)
-    text = f"📅 Ваша подписка активна до {end_date.strftime('%d.%m.%Y')}." if end_date and end_date >= datetime.now().date() else "❗ У вас нет активной подписки. Нажмите «Оплатить»."
-    query.edit_message_text(text, reply_markup=main_menu_keyboard())
+    text = f"📅 Активна до {end_date.strftime('%d.%m.%Y')}." if end_date and end_date >= datetime.now().date() else "❗ Нет активной подписки. Нажмите «Оплатить»."
+    await query.edit_message_text(text, reply_markup=main_menu_keyboard())
 
-def pay(update: Update, context: CallbackContext):
+async def pay(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    query.answer()
-    query.edit_message_text("Выберите сумму оплаты:", reply_markup=payment_amount_keyboard())
+    await query.answer()
+    await query.edit_message_text("Выберите сумму:", reply_markup=payment_amount_keyboard())
 
-def send_admin_notification(bot, user_id, amount):
-    user = get_user(user_id)
-    username = user.get("username", "Unknown")
-    text = f"🔔 Пользователь @{username} (ID: {user_id}) запросил оплату {amount} руб.\nПодтвердить?"
-    bot.send_message(ADMIN_ID, text, reply_markup=admin_confirm_keyboard(user_id, amount))
-
-def extend_subscription(bot, user_id, amount):
-    data = load_data()
-    price_per_month = data["settings"]["price_per_month"]
-    months = max(1, amount // price_per_month)
-    current_end = get_subscription_end(user_id)
-    if current_end and current_end >= datetime.now().date():
-        new_end = current_end + timedelta(days=30 * months)
-    else:
-        new_end = datetime.now().date() + timedelta(days=30 * months)
-    set_subscription_end(user_id, new_end)
-    bot.send_message(user_id, f"✅ Подписка продлена до {new_end.strftime('%d.%m.%Y')}.")
-    bot.send_message(ADMIN_ID, f"✅ Подписка {user_id} продлена на {months} мес.")
-
-def amount(update: Update, context: CallbackContext):
+async def amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    query.answer()
+    await query.answer()
     data = query.data
     if data.startswith("amount_"):
         amount_str = data.split("_")[1]
         if amount_str == "custom":
-            query.edit_message_text("Введите сумму (целое число):")
+            await query.edit_message_text("Введите сумму (целое число):")
             context.user_data["waiting_for_custom"] = True
         else:
             amount = int(amount_str)
-            send_admin_notification(context.bot, query.from_user.id, amount)
-            query.edit_message_text(f"Запрос на {amount} руб. отправлен админу.")
+            user = get_user(query.from_user.id)
+            username = user.get("username", "Unknown")
+            await context.bot.send_message(ADMIN_ID, f"🔔 @{username} (ID: {query.from_user.id}) запросил {amount} руб.", reply_markup=admin_confirm_keyboard(query.from_user.id, amount))
+            await query.edit_message_text(f"Запрос на {amount} руб. отправлен админу.")
     elif data == "back_to_main":
-        query.edit_message_text("Главное меню:", reply_markup=main_menu_keyboard())
+        await query.edit_message_text("Главное меню:", reply_markup=main_menu_keyboard())
 
-def confirm(update: Update, context: CallbackContext):
+async def confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    query.answer()
+    await query.answer()
     if query.from_user.id != ADMIN_ID:
-        query.answer("Нет прав.", show_alert=True)
+        await query.answer("Нет прав.", show_alert=True)
         return
     data = query.data
     if data.startswith("confirm_"):
         _, uid, amt = data.split("_")
-        extend_subscription(context.bot, int(uid), int(amt))
-        query.edit_message_text(f"✅ Подтверждена оплата {amt} руб.")
+        uid, amt = int(uid), int(amt)
+        price = load_data()["settings"]["price_per_month"]
+        months = max(1, amt // price)
+        end_date = get_subscription_end(uid)
+        if end_date and end_date >= datetime.now().date():
+            new_end = end_date + timedelta(days=30 * months)
+        else:
+            new_end = datetime.now().date() + timedelta(days=30 * months)
+        set_subscription_end(uid, new_end)
+        await context.bot.send_message(uid, f"✅ Подписка продлена до {new_end.strftime('%d.%m.%Y')}.")
+        await query.edit_message_text(f"✅ Подтверждено {amt} руб. Продлён на {months} мес.")
     elif data.startswith("reject_"):
         _, uid, amt = data.split("_")
-        context.bot.send_message(int(uid), f"❌ Запрос на {amt} руб. отклонён.")
-        query.edit_message_text(f"❌ Запрос отклонён.")
+        uid, amt = int(uid), int(amt)
+        await context.bot.send_message(uid, f"❌ Запрос на {amt} руб. отклонён.")
+        await query.edit_message_text(f"❌ Запрос отклонён.")
 
-def admin_callback(update: Update, context: CallbackContext):
+async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    query.answer()
+    await query.answer()
     if query.from_user.id != ADMIN_ID:
-        query.answer("Нет прав.", show_alert=True)
+        await query.answer("Нет прав.", show_alert=True)
         return
     data = query.data
     if data == "admin_set_price":
-        query.edit_message_text("Введите новую цену за месяц:")
+        await query.edit_message_text("Введите новую цену за месяц (руб):")
         context.user_data["waiting_for_price"] = True
     elif data == "admin_list_users":
         users = load_data()["users"]
-        text = "Пусто" if not users else "\n".join([f"@{info.get('username', uid)}: {info.get('subscription_end', 'нет')}" for uid, info in users.items()])
-        query.edit_message_text(text, reply_markup=admin_panel_keyboard())
+        if not users:
+            text = "Список подписчиков пуст."
+        else:
+            lines = []
+            for uid, info in users.items():
+                end = info.get("subscription_end")
+                if end == "1970-01-01" or not end:
+                    end = "неактивна"
+                else:
+                    end = datetime.strptime(end, "%Y-%m-%d").strftime("%d.%m.%Y")
+                name = info.get("username") or info.get("first_name") or uid
+                lines.append(f"{name}: {end}")
+            text = "Подписчики:\n" + "\n".join(lines)
+        await query.edit_message_text(text, reply_markup=admin_panel_keyboard())
     elif data == "admin_manual_extend":
         users = load_data()["users"]
         if not users:
-            query.edit_message_text("Нет пользователей.")
+            await query.edit_message_text("Нет пользователей.")
             return
         keyboard = []
         for uid, info in users.items():
@@ -175,47 +177,49 @@ def admin_callback(update: Update, context: CallbackContext):
             name = info.get("username") or info.get("first_name") or uid
             keyboard.append([InlineKeyboardButton(name, callback_data=f"mselect_{uid}")])
         keyboard.append([InlineKeyboardButton("◀️ Назад", callback_data="back_to_main")])
-        query.edit_message_text("Выберите пользователя:", reply_markup=InlineKeyboardMarkup(keyboard))
+        await query.edit_message_text("Выберите пользователя:", reply_markup=InlineKeyboardMarkup(keyboard))
     elif data == "back_to_main":
-        query.edit_message_text("Главное меню:", reply_markup=main_menu_keyboard())
+        await query.edit_message_text("Главное меню:", reply_markup=main_menu_keyboard())
 
-def manual_select(update: Update, context: CallbackContext):
+async def manual_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    query.answer()
+    await query.answer()
     uid = query.data.split("_")[1]
     context.user_data["manual_uid"] = uid
-    keyboard = [[InlineKeyboardButton(f"{m} мес", callback_data=f"mextend_{m}")] for m in [1,3,6,12]]
+    keyboard = [[InlineKeyboardButton(f"{m} мес", callback_data=f"mextend_{m}")] for m in [1, 3, 6, 12]]
     keyboard.append([InlineKeyboardButton("◀️ Назад", callback_data="back_to_main")])
-    query.edit_message_text("Выберите срок:", reply_markup=InlineKeyboardMarkup(keyboard))
+    await query.edit_message_text("Выберите срок:", reply_markup=InlineKeyboardMarkup(keyboard))
 
-def manual_extend(update: Update, context: CallbackContext):
+async def manual_extend(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    query.answer()
+    await query.answer()
     months = int(query.data.split("_")[1])
     uid = int(context.user_data.get("manual_uid"))
     if not uid:
-        query.edit_message_text("Ошибка.")
+        await query.edit_message_text("Ошибка.")
         return
-    current_end = get_subscription_end(uid)
-    if current_end and current_end >= datetime.now().date():
-        new_end = current_end + timedelta(days=30 * months)
+    end_date = get_subscription_end(uid)
+    if end_date and end_date >= datetime.now().date():
+        new_end = end_date + timedelta(days=30 * months)
     else:
         new_end = datetime.now().date() + timedelta(days=30 * months)
     set_subscription_end(uid, new_end)
-    context.bot.send_message(uid, f"Админ продлил подписку до {new_end.strftime('%d.%m.%Y')}.")
-    query.edit_message_text(f"✅ Продлён до {new_end.strftime('%d.%m.%Y')}.")
+    await context.bot.send_message(uid, f"Админ продлил подписку до {new_end.strftime('%d.%m.%Y')}.")
+    await query.edit_message_text(f"✅ Продлён до {new_end.strftime('%d.%m.%Y')}.")
 
-def text_message(update: Update, context: CallbackContext):
+async def text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text.strip()
     if context.user_data.get("waiting_for_custom"):
         try:
             amount = int(text)
             if amount <= 0: raise ValueError
-            send_admin_notification(context.bot, user_id, amount)
-            update.message.reply_text(f"Запрос на {amount} руб. отправлен.")
+            user = get_user(user_id)
+            username = user.get("username", "Unknown")
+            await context.bot.send_message(ADMIN_ID, f"🔔 @{username} (ID: {user_id}) запросил {amount} руб.", reply_markup=admin_confirm_keyboard(user_id, amount))
+            await update.message.reply_text(f"Запрос на {amount} руб. отправлен админу.")
         except:
-            update.message.reply_text("Введите число > 0.")
+            await update.message.reply_text("Введите число больше 0.")
         context.user_data["waiting_for_custom"] = False
     elif user_id == ADMIN_ID and context.user_data.get("waiting_for_price"):
         try:
@@ -224,76 +228,36 @@ def text_message(update: Update, context: CallbackContext):
             data = load_data()
             data["settings"]["price_per_month"] = new_price
             save_data(data)
-            update.message.reply_text(f"✅ Цена {new_price} руб.")
+            await update.message.reply_text(f"✅ Цена установлена: {new_price} руб/мес.")
         except:
-            update.message.reply_text("Ошибка.")
+            await update.message.reply_text("Ошибка: введите число.")
         context.user_data["waiting_for_price"] = False
     elif update.effective_chat.type == "private":
-        update.message.reply_text("Используйте меню.", reply_markup=main_menu_keyboard())
+        await update.message.reply_text("Используйте меню.", reply_markup=main_menu_keyboard())
 
-def admin_command(update: Update, context: CallbackContext):
+async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
-        update.message.reply_text("Нет прав.")
+        await update.message.reply_text("Нет прав.")
         return
-    update.message.reply_text("Панель администратора:", reply_markup=admin_panel_keyboard())
-
-# ========== НАПОМИНАНИЯ ==========
-def send_reminders():
-    bot = telegram.Bot(token=BOT_TOKEN)
-    data = load_data()
-    today = datetime.now().date()
-    tomorrow = today + timedelta(days=1)
-    for uid_str, info in data["users"].items():
-        uid = int(uid_str)
-        if uid == ADMIN_ID: continue
-        end_str = info.get("subscription_end")
-        if not end_str or end_str == "1970-01-01":
-            bot.send_message(uid, "❗ Нет активной подписки. Нажмите /pay.")
-            continue
-        end_date = datetime.strptime(end_str, "%Y-%m-%d").date()
-        if end_date <= tomorrow:
-            msg = f"⚠️ Подписка {'истекла' if end_date < today else 'истекает'} {end_date.strftime('%d.%m.%Y')}. Нажмите /pay."
-            bot.send_message(uid, msg)
-
-# ========== FLASK ==========
-app = Flask(__name__)
-
-@app.route(f"/{BOT_TOKEN}", methods=["POST"])
-def webhook():
-    update = telegram.Update.de_json(request.get_json(force=True), None)
-    updater.dispatcher.process_update(update)
-    return "ok"
-
-@app.route("/cron")
-def cron():
-    if request.args.get("secret") != CRON_SECRET:
-        return "Forbidden", 403
-    try:
-        send_reminders()
-        return "OK"
-    except Exception as e:
-        return str(e), 500
-
-@app.route("/")
-def index():
-    return "Bot is running"
+    await update.message.reply_text("Панель администратора:", reply_markup=admin_panel_keyboard())
 
 # ========== ЗАПУСК ==========
-updater = Updater(token=BOT_TOKEN, use_context=True)
-dp = updater.dispatcher
-dp.add_handler(CommandHandler("start", start))
-dp.add_handler(CommandHandler("admin", admin_command))
-dp.add_handler(MessageHandler(Filters.text & ~Filters.command, text_message))
-dp.add_handler(CallbackQueryHandler(my_subscription, pattern="^my_subscription$"))
-dp.add_handler(CallbackQueryHandler(pay, pattern="^pay$"))
-dp.add_handler(CallbackQueryHandler(amount, pattern="^amount_|^back_to_main$"))
-dp.add_handler(CallbackQueryHandler(admin_callback, pattern="^admin_|^back_to_main$"))
-dp.add_handler(CallbackQueryHandler(confirm, pattern="^confirm_|^reject_$"))
-dp.add_handler(CallbackQueryHandler(manual_select, pattern="^mselect_"))
-dp.add_handler(CallbackQueryHandler(manual_extend, pattern="^mextend_"))
-
-# Вебхук
-updater.bot.set_webhook(f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/{BOT_TOKEN}")
-
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+    print("🚀 Запуск бота...")
+    app = Application.builder().token(BOT_TOKEN).build()
+    
+    # Регистрация хэндлеров
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("admin", admin))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_message))
+    app.add_handler(CallbackQueryHandler(my_subscription, pattern="^my_subscription$"))
+    app.add_handler(CallbackQueryHandler(pay, pattern="^pay$"))
+    app.add_handler(CallbackQueryHandler(amount, pattern="^amount_|^back_to_main$"))
+    app.add_handler(CallbackQueryHandler(admin_callback, pattern="^admin_|^back_to_main$"))
+    app.add_handler(CallbackQueryHandler(confirm, pattern="^confirm_|^reject_$"))
+    app.add_handler(CallbackQueryHandler(manual_select, pattern="^mselect_"))
+    app.add_handler(CallbackQueryHandler(manual_extend, pattern="^mextend_"))
+    
+    # Запуск polling
+    print("✅ Бот запущен. Ожидание сообщений...")
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
