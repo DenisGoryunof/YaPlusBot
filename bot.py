@@ -1,39 +1,44 @@
-# bot.py - Обновленная версия для Fly.io
 import os
 import json
+import asyncio
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
-import asyncio
+from threading import Thread
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID"))
-GROUP_ID = int(os.getenv("GROUP_ID"))
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+GROUP_ID = int(os.getenv("GROUP_ID", "0"))
 MONTH_PRICE = 100
 
-# Fly.io предоставляет постоянное хранилище в /persistent
+# Fly.io постоянное хранилище
 DATA_DIR = "/persistent"
 DATA_FILE = os.path.join(DATA_DIR, "data.json")
 
 # Создаем директорию если её нет
 os.makedirs(DATA_DIR, exist_ok=True)
 
-# ========== РАБОТА С JSON (с постоянным хранилищем) ==========
+# ========== РАБОТА С JSON ==========
 def load_data():
     if not os.path.exists(DATA_FILE):
         return {"users": {}, "settings": {"price_per_month": MONTH_PRICE}}
     try:
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
-    except:
+    except Exception as e:
+        print(f"Error loading data: {e}")
         return {"users": {}, "settings": {"price_per_month": MONTH_PRICE}}
 
 def save_data(data):
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    try:
+        with open(DATA_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"Error saving data: {e}")
 
 def get_user(user_id):
     data = load_data()
@@ -60,7 +65,7 @@ def get_subscription_end(user_id):
             return datetime.strptime(end_str, "%Y-%m-%d").date()
     return None
 
-# ========== КЛАВИАТУРЫ (без изменений) ==========
+# ========== КЛАВИАТУРЫ ==========
 def main_menu_keyboard():
     keyboard = [[InlineKeyboardButton("💰 Оплатить", callback_data="pay")], 
                 [InlineKeyboardButton("📅 Моя подписка", callback_data="my_subscription")]]
@@ -89,7 +94,7 @@ def admin_panel_keyboard():
     ]
     return InlineKeyboardMarkup(keyboard)
 
-# ========== ХЭНДЛЕРЫ (все ваши существующие функции) ==========
+# ========== ХЭНДЛЕРЫ ==========
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type == "private":
         user = update.effective_user
@@ -100,7 +105,10 @@ async def my_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     end_date = get_subscription_end(query.from_user.id)
-    text = f"📅 Активна до {end_date.strftime('%d.%m.%Y')}." if end_date and end_date >= datetime.now().date() else "❗ Нет активной подписки. Нажмите «Оплатить»."
+    if end_date and end_date >= datetime.now().date():
+        text = f"📅 Активна до {end_date.strftime('%d.%m.%Y')}."
+    else:
+        text = "❗ Нет активной подписки. Нажмите «Оплатить»."
     await query.edit_message_text(text, reply_markup=main_menu_keyboard())
 
 async def pay(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -121,7 +129,8 @@ async def amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
             amount = int(amount_str)
             user = get_user(query.from_user.id)
             username = user.get("username", "Unknown")
-            await context.bot.send_message(ADMIN_ID, f"🔔 @{username} (ID: {query.from_user.id}) запросил {amount} руб.", reply_markup=admin_confirm_keyboard(query.from_user.id, amount))
+            await context.bot.send_message(ADMIN_ID, f"🔔 @{username} (ID: {query.from_user.id}) запросил {amount} руб.", 
+                                         reply_markup=admin_confirm_keyboard(query.from_user.id, amount))
             await query.edit_message_text(f"Запрос на {amount} руб. отправлен админу.")
     elif data == "back_to_main":
         await query.edit_message_text("Главное меню:", reply_markup=main_menu_keyboard())
@@ -229,7 +238,8 @@ async def text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if amount <= 0: raise ValueError
             user = get_user(user_id)
             username = user.get("username", "Unknown")
-            await context.bot.send_message(ADMIN_ID, f"🔔 @{username} (ID: {user_id}) запросил {amount} руб.", reply_markup=admin_confirm_keyboard(user_id, amount))
+            await context.bot.send_message(ADMIN_ID, f"🔔 @{username} (ID: {user_id}) запросил {amount} руб.", 
+                                         reply_markup=admin_confirm_keyboard(user_id, amount))
             await update.message.reply_text(f"Запрос на {amount} руб. отправлен админу.")
         except:
             await update.message.reply_text("Введите число больше 0.")
@@ -254,24 +264,44 @@ async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await update.message.reply_text("Панель администратора:", reply_markup=admin_panel_keyboard())
 
-# ========== ЗАПУСК НА FLY.IO ==========
+# Health check сервер для Fly.io
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/health':
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'OK')
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+def run_health_server():
+    port = int(os.environ.get('PORT', 8080))
+    server = HTTPServer(('0.0.0.0', port), HealthHandler)
+    server.serve_forever()
+
+# ========== ЗАПУСК ==========
 if __name__ == "__main__":
-    print("🚀 Запуск бота на Fly.io...")
+    print("🚀 Запуск бота на Fly.io через GitHub Actions...")
     
-    app = Application.builder().token(BOT_TOKEN).build()
+    # Запускаем health check сервер в отдельном потоке
+    health_thread = Thread(target=run_health_server, daemon=True)
+    health_thread.start()
+    
+    # Запускаем бота
+    application = Application.builder().token(BOT_TOKEN).build()
     
     # Регистрация хэндлеров
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("admin", admin))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_message))
-    app.add_handler(CallbackQueryHandler(my_subscription, pattern="^my_subscription$"))
-    app.add_handler(CallbackQueryHandler(pay, pattern="^pay$"))
-    app.add_handler(CallbackQueryHandler(amount, pattern="^amount_|^back_to_main$"))
-    app.add_handler(CallbackQueryHandler(admin_callback, pattern="^admin_|^back_to_main$"))
-    app.add_handler(CallbackQueryHandler(confirm, pattern="^confirm_|^reject_$"))
-    app.add_handler(CallbackQueryHandler(manual_select, pattern="^mselect_"))
-    app.add_handler(CallbackQueryHandler(manual_extend, pattern="^mextend_"))
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("admin", admin))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_message))
+    application.add_handler(CallbackQueryHandler(my_subscription, pattern="^my_subscription$"))
+    application.add_handler(CallbackQueryHandler(pay, pattern="^pay$"))
+    application.add_handler(CallbackQueryHandler(amount, pattern="^amount_|^back_to_main$"))
+    application.add_handler(CallbackQueryHandler(admin_callback, pattern="^admin_|^back_to_main$"))
+    application.add_handler(CallbackQueryHandler(confirm, pattern="^confirm_|^reject_$"))
+    application.add_handler(CallbackQueryHandler(manual_select, pattern="^mselect_"))
+    application.add_handler(CallbackQueryHandler(manual_extend, pattern="^mextend_"))
     
-    # Запуск polling (на Fly.io это будет работать постоянно)
     print("✅ Бот запущен. Ожидание сообщений...")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
