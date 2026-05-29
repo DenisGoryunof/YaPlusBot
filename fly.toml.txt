@@ -1,10 +1,13 @@
-app = "your-bot-name"  # Замените на уникальное имя
+app = "yaplusbot"  # Измените на уникальное имя
 
 [build]
   dockerfile = "Dockerfile"
 
 [env]
-  # Переменные окружения будут добавлены позже через CLI
+  # Переменные будут взяты из GitHub Secrets
+
+[experimental]
+  auto_rollback = true
 
 [http_service]
   internal_port = 8080
@@ -12,7 +15,16 @@ app = "your-bot-name"  # Замените на уникальное имя
   auto_stop_machines = false
   auto_start_machines = true
   min_machines_running = 1
+  
+  [[http_service.checks]]
+    interval = "10s"
+    timeout = "2s"
+    grace_period = "5s"
+    method = "get"
+    path = "/health"
+    protocol = "http"
+    tls_skip_verify = false
 
 [mounts]
-  source = "data_volume"
+  source = "yaplusbot_data"
   destination = "/persistent"
