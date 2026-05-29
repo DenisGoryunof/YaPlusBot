@@ -261,3 +261,20 @@ if __name__ == "__main__":
     # Запуск polling
     print("✅ Бот запущен. Ожидание сообщений...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
+
+# Минимальный веб-сервер для Health Check
+from threading import Thread
+from http.server import HTTPServer, BaseHTTPRequestHandler
+
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b'OK')
+
+def run_health_server():
+    server = HTTPServer(('0.0.0.0', int(os.environ.get('PORT', 10000))), HealthHandler)
+    server.serve_forever()
+
+# Запускаем health сервер в фоне
+Thread(target=run_health_server, daemon=True).start()
