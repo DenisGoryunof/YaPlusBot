@@ -1,24 +1,35 @@
+# bot.py - Обновленная версия для Fly.io
 import os
 import json
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
+import asyncio
 
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
 GROUP_ID = int(os.getenv("GROUP_ID"))
-DATA_FILE = "data.json"
 MONTH_PRICE = 100
 
-# ========== РАБОТА С JSON ==========
+# Fly.io предоставляет постоянное хранилище в /persistent
+DATA_DIR = "/persistent"
+DATA_FILE = os.path.join(DATA_DIR, "data.json")
+
+# Создаем директорию если её нет
+os.makedirs(DATA_DIR, exist_ok=True)
+
+# ========== РАБОТА С JSON (с постоянным хранилищем) ==========
 def load_data():
     if not os.path.exists(DATA_FILE):
         return {"users": {}, "settings": {"price_per_month": MONTH_PRICE}}
-    with open(DATA_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with open(DATA_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except:
+        return {"users": {}, "settings": {"price_per_month": MONTH_PRICE}}
 
 def save_data(data):
     with open(DATA_FILE, "w", encoding="utf-8") as f:
@@ -49,9 +60,10 @@ def get_subscription_end(user_id):
             return datetime.strptime(end_str, "%Y-%m-%d").date()
     return None
 
-# ========== КЛАВИАТУРЫ ==========
+# ========== КЛАВИАТУРЫ (без изменений) ==========
 def main_menu_keyboard():
-    keyboard = [[InlineKeyboardButton("💰 Оплатить", callback_data="pay")], [InlineKeyboardButton("📅 Моя подписка", callback_data="my_subscription")]]
+    keyboard = [[InlineKeyboardButton("💰 Оплатить", callback_data="pay")], 
+                [InlineKeyboardButton("📅 Моя подписка", callback_data="my_subscription")]]
     return InlineKeyboardMarkup(keyboard)
 
 def payment_amount_keyboard():
@@ -64,7 +76,8 @@ def payment_amount_keyboard():
     return InlineKeyboardMarkup(keyboard)
 
 def admin_confirm_keyboard(user_id, amount):
-    keyboard = [[InlineKeyboardButton("✅ Подтвердить", callback_data=f"confirm_{user_id}_{amount}"), InlineKeyboardButton("❌ Отклонить", callback_data=f"reject_{user_id}_{amount}")]]
+    keyboard = [[InlineKeyboardButton("✅ Подтвердить", callback_data=f"confirm_{user_id}_{amount}"), 
+                 InlineKeyboardButton("❌ Отклонить", callback_data=f"reject_{user_id}_{amount}")]]
     return InlineKeyboardMarkup(keyboard)
 
 def admin_panel_keyboard():
@@ -76,7 +89,7 @@ def admin_panel_keyboard():
     ]
     return InlineKeyboardMarkup(keyboard)
 
-# ========== ХЭНДЛЕРЫ ==========
+# ========== ХЭНДЛЕРЫ (все ваши существующие функции) ==========
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type == "private":
         user = update.effective_user
@@ -241,9 +254,10 @@ async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await update.message.reply_text("Панель администратора:", reply_markup=admin_panel_keyboard())
 
-# ========== ЗАПУСК ==========
+# ========== ЗАПУСК НА FLY.IO ==========
 if __name__ == "__main__":
-    print("🚀 Запуск бота...")
+    print("🚀 Запуск бота на Fly.io...")
+    
     app = Application.builder().token(BOT_TOKEN).build()
     
     # Регистрация хэндлеров
@@ -258,23 +272,6 @@ if __name__ == "__main__":
     app.add_handler(CallbackQueryHandler(manual_select, pattern="^mselect_"))
     app.add_handler(CallbackQueryHandler(manual_extend, pattern="^mextend_"))
     
-    # Запуск polling
+    # Запуск polling (на Fly.io это будет работать постоянно)
     print("✅ Бот запущен. Ожидание сообщений...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
-
-# Минимальный веб-сервер для Health Check
-from threading import Thread
-from http.server import HTTPServer, BaseHTTPRequestHandler
-
-class HealthHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b'OK')
-
-def run_health_server():
-    server = HTTPServer(('0.0.0.0', int(os.environ.get('PORT', 10000))), HealthHandler)
-    server.serve_forever()
-
-# Запускаем health сервер в фоне
-Thread(target=run_health_server, daemon=True).start()
