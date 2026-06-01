@@ -1,13 +1,11 @@
-app = "yaplusbot"  # Измените на уникальное имя
+app = "yaplusbot"
+
+primary_region = "ams"
 
 [build]
   dockerfile = "Dockerfile"
 
 [env]
-  # Переменные будут взяты из GitHub Secrets
-
-[experimental]
-  auto_rollback = true
 
 [http_service]
   internal_port = 8080
@@ -23,7 +21,6 @@ app = "yaplusbot"  # Измените на уникальное имя
     method = "get"
     path = "/health"
     protocol = "http"
-    tls_skip_verify = false
 
 [mounts]
   source = "yaplusbot_data"
