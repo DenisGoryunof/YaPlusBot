@@ -93,6 +93,56 @@ def admin_panel_keyboard():
         [InlineKeyboardButton("◀️ Назад", callback_data="back_to_main")]
     ]
     return InlineKeyboardMarkup(keyboard)
+    
+# ========== НАПОМИНАНИЯ О ПОДПИСКЕ ==========
+async def check_subscriptions(context: ContextTypes.DEFAULT_TYPE):
+    """Проверяет все подписки и отправляет уведомления"""
+    data = load_data()
+    today = datetime.now().date()
+    
+    for user_id_str, user_data in data["users"].items():
+        user_id = int(user_id_str)
+        end_str = user_data.get("subscription_end")
+        
+        if not end_str or end_str == "1970-01-01":
+            continue
+            
+        end_date = datetime.strptime(end_str, "%Y-%m-%d").date()
+        days_left = (end_date - today).days
+        
+        # Уведомления за 7, 3 и 1 день до окончания
+        if days_left == 7:
+            await context.bot.send_message(
+                user_id,
+                f"⚠️ Напоминание: Ваша подписка истекает через 7 дней ({end_date.strftime('%d.%m.%Y')}).\n"
+                f"Пожалуйста, продлите подписку, чтобы не потерять доступ. Нажмите /start"
+            )
+        elif days_left == 3:
+            await context.bot.send_message(
+                user_id,
+                f"⚠️ Ваша подписка истекает через 3 дня! ({end_date.strftime('%d.%m.%Y')})\n"
+                f"Продлите подписку заранее: /start"
+            )
+        elif days_left == 1:
+            await context.bot.send_message(
+                user_id,
+                f"🔥 ПОСЛЕДНИЙ ДЕНЬ! Подписка истекает ЗАВТРА ({end_date.strftime('%d.%m.%Y')}).\n"
+                f"Пожалуйста, продлите подписку: /start"
+            )
+        elif days_left == 0:
+            await context.bot.send_message(
+                user_id,
+                f"❌ Ваша подписка ИСТЕКЛА сегодня ({end_date.strftime('%d.%m.%Y')}).\n"
+                f"Для продления нажмите /start"
+            )
+        elif days_left < 0:
+            # Дополнительно: можно уведомить админа о просрочке
+            if days_left in [-1, -7]:  # через 1 и 7 дней после истечения
+                await context.bot.send_message(
+                    ADMIN_ID,
+                    f"⚠️ Пользователь {user_data.get('username', user_id)} имеет просрочку {abs(days_left)} дней"
+                )    
+    
 
 # ========== ХЭНДЛЕРЫ ==========
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -282,16 +332,16 @@ def run_health_server():
 
 # ========== ЗАПУСК ==========
 if __name__ == "__main__":
-    print("🚀 Запуск бота на Fly.io через GitHub Actions...")
+    print("🚀 Запуск бота на Coolify...")
     
-    # Запускаем health check сервер в отдельном потоке
+    # Запускаем health check сервер
     health_thread = Thread(target=run_health_server, daemon=True)
     health_thread.start()
     
     # Запускаем бота
     application = Application.builder().token(BOT_TOKEN).build()
     
-    # Регистрация хэндлеров
+    # Регистрация хэндлеров (ваш существующий код)
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("admin", admin))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_message))
@@ -302,6 +352,17 @@ if __name__ == "__main__":
     application.add_handler(CallbackQueryHandler(confirm, pattern="^confirm_|^reject_$"))
     application.add_handler(CallbackQueryHandler(manual_select, pattern="^mselect_"))
     application.add_handler(CallbackQueryHandler(manual_extend, pattern="^mextend_"))
+    
+    # НАСТРАИВАЕМ ЕЖЕДНЕВНУЮ ПРОВЕРКУ ПОДПИСОК
+    job_queue = application.job_queue
+    if job_queue:
+        # Запускаем проверку каждый день в 10:00 утра
+        job_queue.run_daily(
+            check_subscriptions,
+            time=datetime.time(hour=10, minute=0, second=0),
+            days=tuple(range(7))  # каждый день
+        )
+        print("✅ Настройка ежедневных напоминаний выполнена")
     
     print("✅ Бот запущен. Ожидание сообщений...")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
