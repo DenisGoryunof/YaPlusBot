@@ -1,8 +1,8 @@
 import os
 import json
 import asyncio
-import time
-from datetime import datetime, timedelta, time as dt_time
+import time as dt_time
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
@@ -359,8 +359,8 @@ if __name__ == "__main__":
     if job_queue:
         job_queue.run_daily(
             check_subscriptions,
-            time=datetime.time(hour=10, minute=0, second=0),
-            days=tuple(range(7))  # каждый день
+            time=dt_time(hour=10, minute=0, second=0)
+            days=tuple(range(7))  
         )
         print("✅ Настройка ежедневных напоминаний выполнена")
     
