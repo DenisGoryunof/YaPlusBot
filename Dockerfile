@@ -1,21 +1,16 @@
+# Используем официальный образ Python
 FROM python:3.11-slim
 
+# Устанавливаем рабочую директорию внутри контейнера
 WORKDIR /app
 
-# Устанавливаем системные зависимости
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
-
-# Копируем и устанавливаем Python зависимости
+# Копируем файл с зависимостями и устанавливаем их
+# (Это помогает кешировать этот слой при сборке, если requirements.txt не менялся)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Копируем код приложения
-COPY bot.py .
+# Копируем весь код бота
+COPY . .
 
-# Создаем директорию для постоянного хранилища
-RUN mkdir -p /persistent
-
-# Запускаем бота
-CMD ["python", "-u", "bot.py"]
+# Команда для запуска бота
+CMD ["python", "bot.py"]
