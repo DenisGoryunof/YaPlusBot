@@ -16,7 +16,7 @@ GROUP_ID = int(os.getenv("GROUP_ID", "0"))
 MONTH_PRICE = 100
 
 # Fly.io постоянное хранилище
-DATA_DIR = "/persistent"
+DATA_DIR = os.getenv("DATA_DIR", "/data")
 DATA_FILE = os.path.join(DATA_DIR, "data.json")
 
 # Создаем директорию если её нет
