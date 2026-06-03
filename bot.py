@@ -1,7 +1,8 @@
 import os
 import json
 import asyncio
-from datetime import datetime, timedelta
+import time
+from datetime import datetime, timedelta, time as dt_time
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
@@ -353,10 +354,9 @@ if __name__ == "__main__":
     application.add_handler(CallbackQueryHandler(manual_select, pattern="^mselect_"))
     application.add_handler(CallbackQueryHandler(manual_extend, pattern="^mextend_"))
     
-    # НАСТРАИВАЕМ ЕЖЕДНЕВНУЮ ПРОВЕРКУ ПОДПИСОК
+   
     job_queue = application.job_queue
     if job_queue:
-        # Запускаем проверку каждый день в 10:00 утра
         job_queue.run_daily(
             check_subscriptions,
             time=datetime.time(hour=10, minute=0, second=0),
