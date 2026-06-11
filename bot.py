@@ -84,7 +84,7 @@ async def check_subscriptions(context: ContextTypes.DEFAULT_TYPE):
         end_date = datetime.strptime(end_str, "%Y-%m-%d").date()
         days_left = (end_date - today).days
         
-        # Уведомления для пользователя
+        # Уведомления за 7, 3 и 1 день до окончания
         if days_left == 7:
             await context.bot.send_message(
                 user_id,
@@ -113,18 +113,6 @@ async def check_subscriptions(context: ContextTypes.DEFAULT_TYPE):
                 f"Для продления нажмите /start"
             )
             print(f"📧 Отправлено уведомление об истечении пользователю {user_id}")
-        
-        # ========== УВЕДОМЛЕНИЕ АДМИНИСТРАТОРУ О ПРОСРОЧКАХ ==========
-        # Отправляем админу уведомление, если подписка истекла (days_left < 0)
-        # И только 1 раз в день (при days_left == -1, -7, -14, -30)
-        elif days_left < 0 and days_left in [-1, -7, -14, -30]:
-            user_name = user_data.get("username") or user_data.get("first_name") or str(user_id)
-            await context.bot.send_message(
-                ADMIN_ID,
-                f"⚠️ Пользователь {user_name} (ID: {user_id}) имеет просрочку {abs(days_left)} дней.\n"
-                f"Подписка истекла {end_date.strftime('%d.%m.%Y')}"
-            )
-            print(f"📧 Отправлено уведомление админу о просрочке пользователя {user_id}")
 
 # ========== КЛАВИАТУРЫ ==========
 def main_menu_keyboard():
