@@ -331,14 +331,52 @@ def run_health_server():
 
 # ========== ЗАПУСК ==========
 if __name__ == "__main__":
+    import time
+    import sys
+    
     print("🚀 Запуск бота на Coolify...")
     
-    # Запускаем health check сервер в отдельном потоке
-    health_thread = Thread(target=run_health_server, daemon=True)
-    health_thread.start()
+    # Задержка перед запуском
+    time.sleep(5)
     
-    # Запускаем бота
-    application = Application.builder().token(BOT_TOKEN).build()
+    # Запускаем health check сервер
+    try:
+        health_thread = Thread(target=run_health_server, daemon=True)
+        health_thread.start()
+        print("✅ Health check сервер запущен")
+    except Exception as e:
+        print(f"⚠️ Health check не запущен: {e}")
+    
+    # Проверка токена
+    if not BOT_TOKEN or BOT_TOKEN == "8744053702:AAFEvt9aXRzMmEba09ffkMgXG8Q5tvrZs34":
+        print("❌ ОШИБКА: Используется фейковый токен бота!")
+        print("Получите реальный токен у @BotFather")
+        sys.exit(1)
+    
+    # Проверка сети
+    print("🌐 Проверка сети...")
+    import socket
+    try:
+        socket.gethostbyname("api.telegram.org")
+        print("✅ DNS работает")
+    except:
+        print("❌ DNS не работает")
+        sys.exit(1)
+    
+    # Запускаем бота с увеличенными таймаутами
+    try:
+        from telegram.request import HTTPXRequest
+        
+        request = HTTPXRequest(
+            connect_timeout=30.0,
+            read_timeout=30.0,
+            write_timeout=30.0
+        )
+        application = Application.builder().token(BOT_TOKEN).request(request).build()
+        print("✅ Application создан")
+    except Exception as e:
+        print(f"❌ Ошибка создания application: {e}")
+        sys.exit(1)
     
     # Регистрация хэндлеров
     application.add_handler(CommandHandler("start", start))
@@ -352,18 +390,34 @@ if __name__ == "__main__":
     application.add_handler(CallbackQueryHandler(manual_select, pattern="^mselect_"))
     application.add_handler(CallbackQueryHandler(manual_extend, pattern="^mextend_"))
     
-    # НАСТРАИВАЕМ ЕЖЕДНЕВНУЮ ПРОВЕРКУ ПОДПИСОК
+    # Настройка JobQueue
     job_queue = application.job_queue
     if job_queue:
-        # Запускаем проверку каждый день в 10:00 утра
-        job_queue.run_daily(
-            check_subscriptions,
-            time=dt_time(hour=10, minute=0, second=0),
-            days=tuple(range(7))
-        )
-        print("✅ Настройка ежедневных напоминаний выполнена")
+        try:
+            job_queue.run_daily(
+                check_subscriptions,
+                time=dt_time(hour=10, minute=0, second=0),
+                days=tuple(range(7))
+            )
+            print("✅ Настройка ежедневных напоминаний выполнена")
+        except Exception as e:
+            print(f"⚠️ JobQueue не настроен: {e}")
     else:
-        print("⚠️ JobQueue не доступен. Установите python-telegram-bot[job-queue]")
+        print("⚠️ JobQueue не доступен")
     
     print("✅ Бот запущен. Ожидание сообщений...")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    
+    # Запуск с повторными попытками
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            application.run_polling(allowed_updates=Update.ALL_TYPES)
+            break
+        except Exception as e:
+            print(f"❌ Ошибка запуска (попытка {attempt+1}/{max_retries}): {e}")
+            if attempt < max_retries - 1:
+                print(f"⏳ Повтор через 10 секунд...")
+                time.sleep(10)
+            else:
+                print("❌ Бот не смог запуститься после всех попыток")
+                sys.exit(1)
