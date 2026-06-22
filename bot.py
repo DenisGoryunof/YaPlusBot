@@ -8,6 +8,8 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from threading import Thread
 from http.server import HTTPServer, BaseHTTPRequestHandler
+import socket
+import time
 
 load_dotenv()
 
@@ -22,6 +24,25 @@ DATA_FILE = os.path.join(DATA_DIR, "data.json")
 
 # Создаем директорию если её нет
 os.makedirs(DATA_DIR, exist_ok=True)
+
+# ========== ФУНКЦИЯ ДЛЯ ПРОВЕРКИ DNS С ПОВТОРАМИ ==========
+def wait_for_dns(hostname="api.telegram.org", max_retries=10, delay=3):
+    """Ожидает, пока DNS разрешится"""
+    print(f"🌐 Проверка DNS для {hostname}...")
+    for attempt in range(max_retries):
+        try:
+            # Используем getaddrinfo вместо gethostbyname (более надежно)
+            socket.getaddrinfo(hostname, 443)
+            print(f"✅ DNS работает (попытка {attempt+1})")
+            return True
+        except socket.gaierror as e:
+            print(f"⚠️ DNS не разрешается (попытка {attempt+1}/{max_retries}): {e}")
+            if attempt < max_retries - 1:
+                print(f"⏳ Ожидание {delay} секунд...")
+                time.sleep(delay)
+    
+    print("❌ DNS не работает после всех попыток")
+    return False
 
 # ========== РАБОТА С JSON ==========
 def load_data():
@@ -331,13 +352,27 @@ def run_health_server():
 
 # ========== ЗАПУСК ==========
 if __name__ == "__main__":
-    import time
     import sys
     
     print("🚀 Запуск бота на Coolify...")
     
-    # Задержка перед запуском
-    time.sleep(5)
+    # Сначала ждем DNS
+    if not wait_for_dns("api.telegram.org", max_retries=15, delay=5):
+        print("❌ DNS не работает. Попытка использовать hosts файл...")
+        # Пробуем добавить в hosts
+        try:
+            with open('/etc/hosts', 'a') as f:
+                f.write('\n149.154.167.220 api.telegram.org\n')
+                f.write('149.154.167.99 telegram.org\n')
+            print("✅ Добавлены записи в /etc/hosts")
+            
+            # Проверяем еще раз
+            if wait_for_dns("api.telegram.org", max_retries=3, delay=2):
+                print("✅ DNS работает после добавления hosts")
+            else:
+                print("⚠️ Все еще проблемы с DNS, но продолжаем...")
+        except Exception as e:
+            print(f"⚠️ Не удалось изменить /etc/hosts: {e}")
     
     # Запускаем health check сервер
     try:
@@ -348,19 +383,9 @@ if __name__ == "__main__":
         print(f"⚠️ Health check не запущен: {e}")
     
     # Проверка токена
-    if not BOT_TOKEN or BOT_TOKEN == "8744053702:AAFEvt9aXRzMmEba09ffkMgXG8Q5tvrZs34":
-        print("❌ ОШИБКА: Используется фейковый токен бота!")
-        print("Получите реальный токен у @BotFather")
-        sys.exit(1)
-    
-    # Проверка сети
-    print("🌐 Проверка сети...")
-    import socket
-    try:
-        socket.gethostbyname("api.telegram.org")
-        print("✅ DNS работает")
-    except:
-        print("❌ DNS не работает")
+    if not BOT_TOKEN:
+        print("❌ ОШИБКА: BOT_TOKEN не установлен!")
+        print("Установите переменную окружения BOT_TOKEN")
         sys.exit(1)
     
     # Запускаем бота с увеличенными таймаутами
